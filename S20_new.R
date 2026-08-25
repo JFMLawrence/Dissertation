@@ -1,0 +1,157 @@
+rm(list=ls())
+
+library(DESeq2)
+library(RColorBrewer)
+library(pheatmap)
+library(openxlsx)
+
+work_dir <- "~/diss"
+setwd(work_dir)
+
+data <- readRDS("star_output/diss.RDS")
+
+# Clean column names
+colnames(data) <- sub("ReadsPerGene.out.tab", "", colnames(data))
+
+meta <- read.table("metadata/SraRunTable.csv",
+                   header=TRUE, sep=",", stringsAsFactors=FALSE)
+
+# Keep only samples present in count matrix
+meta <- subset(meta, Run %in% colnames(data))
+
+# Keep only relevant columns
+meta <- meta[, c("Run", "disease")]
+meta <- meta[!duplicated(meta), ]
+
+# Set rownames
+rownames(meta) <- meta$Run
+
+rownames(data) <- data$GeneID
+data <- data[, meta$Run]
+
+if (!all(colnames(data) == rownames(meta))) {
+  stop("Column names of count data do not match metadata rownames!")
+}
+
+meta$disease <- factor(meta$disease)
+
+# 1. Clean raw strings FIRST
+meta$disease <- trimws(meta$disease)                 # remove leading/trailing spaces
+meta$disease <- tolower(meta$disease)               # lowercase everything
+meta$disease <- gsub("[^a-z ]", "", meta$disease)   # remove punctuation
+meta$disease <- gsub(" +", " ", meta$disease)       # collapse multiple spaces
+
+# 2. Standardise categories
+meta$disease[meta$disease == "normal"] <- "normal"
+meta$disease[grepl("deep", meta$disease)] <- "DIE"
+meta$disease[grepl("ovarian", meta$disease)] <- "OE"
+meta$disease[grepl("peritoneal", meta$disease)] <- "PE"
+meta$disease[meta$disease == "endometriosis"] <- "endometriosis"
+
+# 3. Convert to factor AFTER cleaning
+meta$disease <- factor(meta$disease)
+
+# 4. Set reference level
+meta$disease <- relevel(meta$disease, ref="normal")
+
+dds <- DESeqDataSetFromMatrix(countData = data,
+                              colData = meta,
+                              design = ~ disease)
+
+dds <- DESeq(dds)
+
+resultsNames(dds)
+raw_counts <- counts(dds, normalized = FALSE, replaced = FALSE)
+norm_counts <- counts(dds, normalized = TRUE, replaced = FALSE)
+
+output_dir<-"Deseq2_output/"
+dir.create(output_dir)
+FDR_cutoff<-0.05
+
+process_result <- function(res, comparison_name, raw_counts, norm_counts, meta) {
+  
+  res <- as.data.frame(res)
+  res$gene_id <- rownames(res)
+  
+  # Signed fold change
+  res$SignedFoldChange <- 2^abs(res$log2FoldChange) * sign(res$log2FoldChange)
+  
+  # Load annotation
+  annotationfile <- "genome/mart_export_human_ensembl116_gene_annotation.txt"
+  annotation <- read.delim(annotationfile, stringsAsFactors=FALSE)
+  
+  # Merge annotation
+  res <- merge(annotation, res, by.x="Gene.stable.ID", by.y="gene_id", all.y=TRUE)
+  
+  # Merge raw + normalized counts
+  raw_countsdf <- as.data.frame(raw_counts)
+  raw_countsdf$gene_id <- rownames(raw_countsdf)
+  
+  norm_counts_labeled <- norm_counts
+  colnames(norm_counts_labeled) <- paste(colnames(norm_counts_labeled), "norm_count", sep="_")
+  norm_countsdf <- as.data.frame(norm_counts_labeled)
+  norm_countsdf$gene_id <- rownames(norm_countsdf)
+  
+  res <- merge(res, norm_countsdf, by.x="Gene.stable.ID", by.y="gene_id")
+  res <- merge(res, raw_countsdf, by.x="Gene.stable.ID", by.y="gene_id")
+  
+  # Output directory
+  output_dir <- "Deseq2_output/"
+  dir.create(output_dir, showWarnings=FALSE)
+  
+  # Write full results
+  write.xlsx(res, file=paste0(output_dir, comparison_name, "_Deseq2.xlsx"), overwrite=TRUE)
+  
+  # Filter significant genes
+  res <- subset(res, !is.na(padj))
+  siggenes <- subset(res, padj < 0.05)
+  
+  siggenesup <- subset(siggenes, log2FoldChange > 0)
+  siggenesdown <- subset(siggenes, log2FoldChange < 0)
+  
+  write.xlsx(siggenes, file=paste0(output_dir, comparison_name, "_siggenes.xlsx"), overwrite=TRUE)
+  write.xlsx(siggenesup, file=paste0(output_dir, comparison_name, "_upsiggenes.xlsx"), overwrite=TRUE)
+  write.xlsx(siggenesdown, file=paste0(output_dir, comparison_name, "_downsiggenes.xlsx"), overwrite=TRUE)
+  
+  # Top 25 (or fewer, if not enough significant genes) heatmap
+  o <- order(siggenes$padj)
+  siggenes <- siggenes[o, ]
+  
+  n_top <- min(25, nrow(siggenes))
+  if (n_top == 0) {
+    warning(paste0("No significant genes for ", comparison_name, " - skipping heatmap."))
+    return(invisible(NULL))
+  }
+  top25 <- siggenes[seq_len(n_top), ]
+  rownames(top25) <- top25$Gene.name
+  
+  idx <- grep("norm_count", colnames(top25))
+  top25_norm_counts <- top25[, idx]
+  colnames(top25_norm_counts) <- sub("_norm_count", "", colnames(top25_norm_counts))
+  
+  anno <- data.frame(Disease = meta$disease)
+  rownames(anno) <- rownames(meta)
+  
+  if (!all(colnames(top25_norm_counts) == rownames(anno))) {
+    stop("Names of count data are not in the same order as annotation!")
+  }
+  
+  png(filename=paste0(output_dir, comparison_name, "_top25_heatmap.png"),
+      width=2250, height=2250, units="px", res=300)
+  
+  pheatmap(as.matrix(top25_norm_counts), cellwidth=12, cellheight=12,
+           scale="row", annotation_col=anno,
+           main=comparison_name)
+  
+  dev.off()
+}
+
+res_die <- results(dds, contrast=c("disease", "DIE", "normal"))
+res_oe  <- results(dds, contrast=c("disease", "OE",  "normal"))
+res_pe  <- results(dds, contrast=c("disease", "PE",  "normal"))
+
+process_result(res_die, "DIE_vs_normal", raw_counts, norm_counts, meta)
+process_result(res_oe,  "OE_vs_normal",  raw_counts, norm_counts, meta)
+process_result(res_pe,  "PE_vs_normal",  raw_counts, norm_counts, meta)
+
+sessionInfo()
