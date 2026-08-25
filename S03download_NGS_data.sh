@@ -4,12 +4,10 @@
 #SBATCH --mem=2G            # memory required, in units of k,M or G, up to 250G.
 #SBATCH --gres=tmp:3G       # $TMPDIR space required on each compute node, up to 400G.
 #SBATCH -t 03:00:00     # time limit in format dd-hh:mm:ss
-#SBATCH --job-name=S03download_NGS_data # This name will let you follow your job
+#SBATCH --job-name=S03download_NGS_data 
 #SBATCH --output=../log/S03download_NGS_data%A_%a.out
 #SBATCH --error=../log/S03download_NGS_data%A_%a.err
 #SBATCH --array=1
-#SBATCH --mail-type=ALL # send mails at beginning, end and if aborted unexpectedly
-#SBATCH --mail-user=hhmv82@durham.ac.uk # Please change to your email address
 #Runtime about 3 minutes
 cd ~/diss
 work_dir="fastq"
