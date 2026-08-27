@@ -1,0 +1,24 @@
+#!/bin/bash
+#SBATCH -p shared 
+#SBATCH -c 1                
+#SBATCH --mem=2G           
+#SBATCH --gres=tmp:3G      
+#SBATCH -t 01:00:00     
+#SBATCH --job-name=S14multiqc2 
+#SBATCH --output=../log/S14multiqc2%A_%a.out
+#SBATCH --error=../log/S14multiqc2%A_%a.err
+#SBATCH --array=1
+out_dir=~/diss/multiqc_report
+if [ ! -d $out_dir ]
+then
+  mkdir $out_dir
+fi
+
+module load bioinformatics
+module load  multiqc/1.35
+export PYTHONIOENCODING=utf-8 #Set the Python encoding to UTF-8
+#multiqc  --help # to display the help page
+multiqc --force \
+  --outdir ${out_dir} \
+  --filename multiqc2 \
+  ~/diss/trimmed
