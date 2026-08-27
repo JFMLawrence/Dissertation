@@ -1,10 +1,10 @@
 #!/bin/bash
-#SBATCH -p shared # You select the queue(cluster) here
-#SBATCH -c 1                # number of CPU cores to allocate, one per thread, up to 128.
-#SBATCH --mem=16G            # memory required, in units of k,M or G, up to 250G.
-#SBATCH --gres=tmp:24G       # $TMPDIR space required on each compute node, up to 400G.
-#SBATCH -t 01:00:00     # time limit in format dd-hh:mm:ss
-#SBATCH --job-name=S17multiqc3 # This name will let you follow your job
+#SBATCH -p shared 
+#SBATCH -c 1                
+#SBATCH --mem=16G            
+#SBATCH --gres=tmp:24G       
+#SBATCH -t 01:00:00     
+#SBATCH --job-name=S17multiqc3 
 #SBATCH --output=../log/S17multiqc3%A_%a.out
 #SBATCH --error=../log/S17multiqc3%A_%a.err
 #SBATCH --array=1
