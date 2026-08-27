@@ -1,0 +1,230 @@
+work_dir <- "~/diss/Deseq2_output"
+setwd(work_dir)
+
+library(readxl)
+DIE_vs_normal_Deseq2 <- read_excel("DIE_vs_normal_Deseq2.xlsx")
+PE_vs_normal_Deseq2 <- read_excel("PE_vs_normal_Deseq2.xlsx")
+OE_vs_normal_Deseq2 <- read_excel("OE_vs_normal_Deseq2.xlsx")
+
+
+DIE_vs_normal_upsiggenes <- read_excel("DIE_vs_normal_upsiggenes.xlsx")
+PE_vs_normal_upsiggenes <- read_excel("PE_vs_normal_upsiggenes.xlsx")
+OE_vs_normal_upsiggenes <- read_excel("OE_vs_normal_upsiggenes.xlsx")
+
+DIE_vs_normal_upsiggenes <- read_excel("DIE_vs_normal_downsiggenes.xlsx")
+PE_vs_normal_upsiggenes <- read_excel("PE_vs_normal_downsiggenes.xlsx")
+OE_vs_normal_upsiggenes <- read_excel("OE_vs_normal_downsiggenes.xlsx")
+
+library(readxl)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(enrichplot)
+library(ggplot2)
+library(patchwork)
+library(scales)
+
+input_files <- c(
+  "DIE_up"   = "DIE_vs_normal_upsiggenes.xlsx",
+  "DIE_down" = "DIE_vs_normal_downsiggenes.xlsx",
+  
+  "OE_up"    = "OE_vs_normal_upsiggenes.xlsx",
+  "OE_down"  = "OE_vs_normal_downsiggenes.xlsx",
+  
+  "PE_up"    = "PE_vs_normal_upsiggenes.xlsx",
+  "PE_down"  = "PE_vs_normal_downsiggenes.xlsx"
+)
+
+# Change this if the column containing gene symbols has another name
+gene_column <- "Gene.name"
+
+
+## Run GO Biological Process enrichment for one gene list
+run_go_bp <- function(gene_symbols) {
+  
+  gene_symbols <- unique(na.omit(gene_symbols))
+  
+  if (length(gene_symbols) < 5) return(NULL)
+  
+  converted_genes <- bitr(
+    gene_symbols,
+    fromType = "SYMBOL",
+    toType = "ENTREZID",
+    OrgDb = org.Hs.eg.db
+  )
+  
+  entrez_genes <- unique(converted_genes$ENTREZID)
+  
+  if (length(entrez_genes) < 5) return(NULL)
+  
+  result <- enrichGO(
+    gene = entrez_genes,
+    OrgDb = org.Hs.eg.db,
+    keyType = "ENTREZID",
+    ont = "BP",
+    pAdjustMethod = "BH",
+    pvalueCutoff = 0.05,
+    qvalueCutoff = 0.05,
+    readable = TRUE
+  )
+  
+  if (is.null(result) || nrow(as.data.frame(result)) == 0) {
+    return(NULL)
+  }
+  
+  result
+}
+
+## Read all six files and run enrichment
+
+enrich_list <- list()
+
+for (comparison_name in names(input_files)) {
+  
+  gene_data <- read_excel(input_files[[comparison_name]])
+  
+  if (!gene_column %in% colnames(gene_data)) {
+    stop(
+      paste0(
+        "Column '", gene_column, "' was not found in ",
+        input_files[[comparison_name]], ". Available columns are: ",
+        paste(colnames(gene_data), collapse = ", ")
+      )
+    )
+  }
+  
+  genes <- gene_data[[gene_column]]
+  
+  enrich_list[[comparison_name]] <- run_go_bp(genes)
+  
+  message(comparison_name, ": ",
+    length(unique(na.omit(genes))), " genes"
+  )
+}
+
+## Enrichment dotplots
+dot_list <- list()
+
+for (comparison_name in names(enrich_list)) {
+  
+  enrich_result <- enrich_list[[comparison_name]]
+  
+  # Skip a file where no significant GO terms were found
+  if (is.null(enrich_result)) next
+  
+  # Makes titles such as "DIE: up-regulated genes"
+  plot_title <- gsub("_up$", ": up-regulated genes", comparison_name)
+  plot_title <- gsub("_down$", ": down-regulated genes", plot_title)
+  
+  p_dot <- dotplot(
+    enrich_result,
+    showCategory = 10,
+    label_format = 50
+  ) +
+    ggtitle(plot_title) +
+    theme(
+      plot.title = element_text(face = "bold", size = 17, hjust = 0.5),
+      axis.text.y = element_text(size = 14, lineheight = 1.1),
+      axis.text.x = element_text(size = 13),
+      axis.title = element_text(size = 12),
+      legend.title = element_text(size = 11, face = "bold"),
+      legend.text = element_text(size = 10),
+      
+      # One readable legend per dotplot
+      legend.position = "right",
+      legend.box = "vertical",
+      
+      # Leave room for GO-term labels on the left
+      plot.margin = margin(t = 10, r = 10, b = 10, l = 60)
+    )
+  
+  # Prevent log10(0)
+  p_dot$data$p.adjust <- pmax(
+    p_dot$data$p.adjust,
+    .Machine$double.xmin
+  )
+  
+  p_dot <- p_dot +
+    scale_color_gradient(
+      low = "red",
+      high = "blue",
+      trans = "log10",
+      labels = label_scientific(digits = 1),
+      name = "Adjusted\np-value"
+    )
+  
+  dot_list[[comparison_name]] <- p_dot
+}
+
+if (length(dot_list) == 0) {
+  stop("No GO-BP enrichment results were found. Check gene IDs and input files.")
+}
+
+## Shared axes and dot-size scales formatting
+all_gene_ratios <- unlist(lapply(dot_list, function(p) p$data$GeneRatio))
+all_gene_ratios <- all_gene_ratios[is.finite(all_gene_ratios)]
+
+all_counts <- unlist(lapply(dot_list, function(p) p$data$Count))
+all_counts <- all_counts[is.finite(all_counts)]
+
+x_limit <- max(all_gene_ratios) * 1.1
+count_limits <- range(all_counts)
+
+dot_list <- lapply(dot_list, function(p) {
+  p +
+    scale_x_continuous(
+      limits = c(0, x_limit),
+      breaks = breaks_pretty(n = 5),
+      labels = label_number(accuracy = 0.01)
+    ) +
+    scale_size_continuous(
+      limits = count_limits,
+      range = c(4, 12),
+      breaks = breaks_pretty(n = 4),
+      name = "Gene count"
+    ) +
+    guides(
+      color = guide_colorbar(
+        title = "Adjusted\np-value",
+        title.position = "top",
+        barheight = grid::unit(3.2, "cm"),
+        barwidth = grid::unit(0.45, "cm"),
+        label.position = "right"
+      ),
+      size = guide_legend(
+        title = "Gene count",
+        title.position = "top",
+        ncol = 1,
+        override.aes = list(shape = 21, color = "black", fill = "white"),
+      )
+    )
+})
+
+##Plot Formatting
+combined_dotplot <- wrap_plots(
+  dot_list,
+  ncol = 2
+)
+
+combined_dotplot
+
+## Save File
+ggsave(
+  "GO_BP_up_down_dotplots.png",
+  plot = combined_dotplot,
+  width = 23,
+  height = 22,
+  units = "in",
+  dpi = 300,
+  bg = "white"
+)
+
+ggsave(
+  "GO_BP_up_down_dotplots.pdf",
+  plot = combined_dotplot,
+  width = 20,
+  height = 18,
+  units = "in",
+  useDingbats = FALSE
+)
+
+Save to Dropbox's Sidebar Button
