@@ -1,0 +1,68 @@
+work_dir <- "~/diss"
+setwd(work_dir)
+
+annotationfile <- "genome/mart_export_human_ensembl116_gene_annotation.txt"
+output_dir <- "Deseq2_output"
+
+gene_annotation <- read.delim(annotationfile, stringsAsFactors = FALSE)
+
+res_die_df <- transform(as.data.frame(res_die), gene_id = rownames(res_die), Comparison = "DIE_vs_normal")
+res_oe_df  <- transform(as.data.frame(res_oe),  gene_id = rownames(res_oe),  Comparison = "OE_vs_normal")
+res_pe_df  <- transform(as.data.frame(res_pe),  gene_id = rownames(res_pe),  Comparison = "PE_vs_normal")
+
+all_results <- rbind(res_die_df, res_oe_df, res_pe_df)
+
+annotation <- read.delim(annotationfile, stringsAsFactors = FALSE)
+
+all_results$GeneSymbol <- annotation$Gene.name[
+  match(all_results$gene_id, annotation$Gene.stable.ID)
+]
+
+
+gwas_genes <- c(
+  "WNT4", "CDC42", "LINC00339", "CDC42-IT1", "SYNE1", "FSHB",
+  "RP1-224A6.3", "ARL14EP", "GREB1", "CCDC170", "RP4-710M3.1",
+  "C6orf211", "RP4-562D20.2", "RN7SL674P", "RP11-408N14.1",
+  "CDKN2B-AS1", "KDR", "GDAP1", "RNA5SP84", "CTD-2320G14.2",
+  "RP1-167F1.2", "ESR1", "RP4-625H18.2", "HMGN1P19", "IL1A",
+  "RMND1", "IL1B", "RNLS", "RP3-471C18.2", "BMF",
+  "CTD-2227E11.1", "AC003090.1", "DNM3", "VEZT", "SRP14-AS1",
+  "RP11-521C20.2", "FGD6", "MLLT10", "ZBTB2", "RPS2P32",
+  "TRA2A", "SLC9A9", "RP3-471C18.1", "MTG1", "MIR3685",
+  "MIR331", "LINC00629", "AC079780.3", "RP11-456D7.1", "IGF1",
+  "HOXC-AS2", "DNM3OS", "MIR196A2", "SKAP1", "RIN3",
+  "IGF2BP3", "PLAC1"
+)
+
+overlap_results <- subset(
+  all_results,
+  !is.na(padj) &
+    padj < 0.05 &
+    toupper(trimws(GeneSymbol)) %in% toupper(gwas_genes)
+)
+
+# One row per gene x comparison it was significant in
+overlap_results <- overlap_results[order(overlap_results$padj), ]
+
+overlap_summary <- aggregate(
+  Comparison ~ gene_id + GeneSymbol,
+  data = overlap_results,
+  FUN = function(x) paste(unique(x), collapse = "; ")
+)
+
+# Add best (smallest) padj per gene across comparisons
+best_padj <- aggregate(padj ~ gene_id, data = overlap_results, FUN = min)
+overlap_summary <- merge(overlap_summary, best_padj, by = "gene_id")
+overlap_summary <- overlap_summary[order(overlap_summary$padj), ]
+
+write.xlsx(
+  overlap_summary,
+  file = paste0(output_dir, "/GWAS_RNAseq_overlap_gene_list.xlsx"),
+  overwrite = TRUE
+)
+
+print(overlap_summary)
+
+
+overlap_gene_symbols <- unique(overlap_results$GeneSymbol)
+overlap_gene_symbols
