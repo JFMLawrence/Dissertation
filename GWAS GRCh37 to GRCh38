@@ -1,0 +1,17 @@
+library(biomaRt)
+library(data.table)
+
+gwas_genes <- fread("significant_genes.csv")$gene
+gwas_genes <-gwas_genes[gwas_genes != "Y_RNA"]
+
+BiocManager::install("EnsDb.Hsapiens.v86")
+library(EnsDb.Hsapiens.v86)
+library(ensembldb)
+
+edb38 <- EnsDb.Hsapiens.v86
+
+annot_gwas <- genes(
+  edb38,
+  filter = SymbolFilter(gwas_genes),
+  return.type = "DataFrame"
+)[, c("symbol", "gene_id")]
