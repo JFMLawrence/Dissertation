@@ -1,0 +1,65 @@
+## GWAS gene list (Ensembl IDs)
+gwas_ensembl <- unique(annot_gwas_df$gene_id)   
+
+## Combine per-comparison DESeq2 results into one table
+DIE_vs_normal_Deseq2$Comparison <- "DIE_vs_normal"
+OE_vs_normal_Deseq2$Comparison  <- "OE_vs_normal"
+PE_vs_normal_Deseq2$Comparison  <- "PE_vs_normal"
+
+all_results <- rbind(DIE_vs_normal_Deseq2, OE_vs_normal_Deseq2, PE_vs_normal_Deseq2)
+
+## Fisher's exact test function, per comparison + direction 
+run_fisher <- function(data, comparison_name, direction, gwas_list, padj_cutoff = 0.05) {
+  
+  df <- subset(data, Comparison == comparison_name & !is.na(padj) & !is.na(log2FoldChange))
+  
+  df$in_gwas <- df$Gene.stable.ID %in% gwas_list
+  
+  if (direction == "UP") {
+    df$is_de <- df$padj < padj_cutoff & df$log2FoldChange > 0
+  } else if (direction == "DOWN") {
+    df$is_de <- df$padj < padj_cutoff & df$log2FoldChange < 0
+  } else {
+    df$is_de <- df$padj < padj_cutoff
+  }
+  
+  a <- sum(df$in_gwas & df$is_de)
+  b <- sum(df$in_gwas & !df$is_de)
+  c <- sum(!df$in_gwas & df$is_de)
+  d <- sum(!df$in_gwas & !df$is_de)
+  
+  mat <- matrix(c(a, b, c, d), nrow = 2, byrow = TRUE,
+                dimnames = list(c("GWAS_gene", "not_GWAS"), c("DE", "not_DE")))
+  
+  ft <- fisher.test(mat)
+  
+  gene_list <- df$Gene.name[df$in_gwas & df$is_de]
+  ensembl_fallback <- df$Gene.stable.ID[df$in_gwas & df$is_de]
+  gene_list[is.na(gene_list) | gene_list == ""] <- ensembl_fallback[is.na(gene_list) | gene_list == ""]
+  
+  data.frame(
+    Comparison = comparison_name,
+    Direction = direction,
+    Gene_count = a,
+    Overlap_pct = round(100 * a / length(gwas_list), 1),
+    Fisher_p = ft$p.value,
+    Odds_ratio = unname(ft$estimate),
+    Gene_list = paste(sort(gene_list), collapse = ", "),
+    stringsAsFactors = FALSE
+  )
+}
+
+## Run across all subtypes (comparisons) and directions
+comparisons <- c("DIE_vs_normal", "OE_vs_normal", "PE_vs_normal")
+directions  <- c("UP", "DOWN")
+
+fisher_results <- do.call(rbind, lapply(comparisons, function(comp) {
+  do.call(rbind, lapply(directions, function(dir) {
+    run_fisher(all_results, comp, dir, gwas_ensembl)
+  }))
+}))
+
+print(fisher_results)
+
+
+write.xlsx(fisher_results, file = "GWAS_RNAseq_fisher_overlap.xlsx", overwrite = TRUE)
