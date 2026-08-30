@@ -35,23 +35,23 @@ if (!all(colnames(data) == rownames(meta))) {
 
 meta$disease <- factor(meta$disease)
 
-# 1. Clean raw strings FIRST
-meta$disease <- trimws(meta$disease)                 # remove leading/trailing spaces
-meta$disease <- tolower(meta$disease)               # lowercase everything
-meta$disease <- gsub("[^a-z ]", "", meta$disease)   # remove punctuation
-meta$disease <- gsub(" +", " ", meta$disease)       # collapse multiple spaces
+# Clean raw strings 
+meta$disease <- trimws(meta$disease)                
+meta$disease <- tolower(meta$disease)               
+meta$disease <- gsub("[^a-z ]", "", meta$disease)   
+meta$disease <- gsub(" +", " ", meta$disease)       
 
-# 2. Standardise categories
+# Standardise categories
 meta$disease[meta$disease == "normal"] <- "normal"
 meta$disease[grepl("deep", meta$disease)] <- "DIE"
 meta$disease[grepl("ovarian", meta$disease)] <- "OE"
 meta$disease[grepl("peritoneal", meta$disease)] <- "PE"
 meta$disease[meta$disease == "endometriosis"] <- "endometriosis"
 
-# 3. Convert to factor AFTER cleaning
+# Convert to factor AFTER cleaning
 meta$disease <- factor(meta$disease)
 
-# 4. Set reference level
+# Set reference level
 meta$disease <- relevel(meta$disease, ref="normal")
 
 dds <- DESeqDataSetFromMatrix(countData = data,
