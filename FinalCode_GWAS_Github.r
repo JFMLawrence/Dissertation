@@ -37,6 +37,7 @@ library(GenomicRanges)
 library(ensembldb)
 library(EnsDb.Hsapiens.v75)
 
+
 # Input Parameters
 input_file <- "GCST90205183_buildGRCh37.tsv.gz"   
 
@@ -47,6 +48,7 @@ pvalue_threshold  <- 5e-8
 max_gene_distance <- 100000  
 
 chrom_levels <- c(as.character(1:22), "X")  
+
 
 # Load and Clean GWAS Data
 gwas <- fread(input_file)
@@ -59,8 +61,9 @@ stopifnot(all(required_cols %in% colnames(gwas)))
 gwas <- gwas[!is.na(p_value) & !is.na(chromosome) & !is.na(base_pair_location)]
 
 
-## GWAS Quality Control
-# Sanity/confirmation check
+# GWAS Quality Control
+
+## Value sanity/confirmation check
 cat("Columns present:", all(required_cols %in% names(gwas)), "\n")
 cat("Any p-values <= 0?", any(gwas$p_value <= 0), "\n")
 cat("Any p-values > 1?", any(gwas$p_value > 1), "\n")
@@ -73,7 +76,7 @@ if ("rsid" %in% names(gwas)) {
   cat("No rsID column found; skipping duplicate SNP check.\n")
 }
 
-## QQ plot
+## QQ plot: observed vs. expected -log10(p)
 observed <- sort(gwas$p_value)
 expected <- ppoints(length(observed))
 
@@ -93,7 +96,9 @@ ggsave("GWAS_QQ_plot.png", qq_plot, width = 7, height = 5, dpi = 300)
 lambda_gc <- median(qchisq(1 - observed, 1)) / qchisq(0.5, 1)
 cat("Genomic inflation factor (lambda GC):", round(lambda_gc, 3), "\n")
 
+
 # Standardise Chromosome Labels & Build Cumulative Genomic Position
+
 # Harmonise chromosome naming: strip any "chr" prefix, and recode "23" as "X"
 gwas[, chromosome := gsub("^chr", "", chromosome)]
 gwas[chromosome == "23", chromosome := "X"]
@@ -123,6 +128,7 @@ axis_set <- plot_data %>%
   group_by(chrom) %>%
   summarise(center = mean(pos_cum), .groups = "drop")
 
+
 # Genome-wide Significant SNPs
 sig <- gwas_std[pval < pvalue_threshold]
 cat("Significant SNPs:", nrow(sig), "\n")
@@ -131,11 +137,13 @@ if (nrow(sig) == 0) {
   stop("No significant SNPs found")
 }
 
+
 # Map Significant SNPs to Genes
 edb <- EnsDb.Hsapiens.v75
 
 # Pull gene coordinates (Ensembl release 75 / GRCh37) for nearest-gene search
-genes <- genes(edb, columns = c("symbol", "seq_name", "gene_seq_start", "gene_seq_end"))
+genes <- genes(edb,
+               columns = c("symbol", "seq_name", "gene_seq_start", "gene_seq_end"))
 
 # Restrict to SNPs on chromosomes present in the annotation 
 sig <- sig[sig$chrom %in% seqlevels(genes)]
@@ -163,13 +171,15 @@ cat("Candidate genes:", nrow(top_hits), "\n")
 
 fwrite(top_hits[, .(gene)], output_gene_file)
 
+
 # Add Cumulative Genomic Position to Candidate Genes
 top_hits <- top_hits %>%
   mutate(chrom = factor(chrom, levels = chrom_levels)) %>%
   left_join(chrom_sizes, by = "chrom") %>%
   mutate(pos_cum = pos + pos_add)
 
-## Manhattan Plot
+
+# Manhattan plot labeling ALL candidate genes over the threshold
 manhattan <- ggplot(plot_data, aes(pos_cum, -log10(pval), colour = chrom)) +
   geom_point(size = 0.8, alpha = 0.7) +
   geom_hline(
@@ -196,12 +206,14 @@ manhattan <- ggplot(plot_data, aes(pos_cum, -log10(pval), colour = chrom)) +
   ) +
   labs(
     x = "Chromosome",
-    y = expression(-log[10](p))
+    y = expression(-log[10](p)),
   ) +
   theme_minimal() +
   theme(
     legend.position = "none",
-    axis.text.x = element_text(angle = 90, size = 8)
+    axis.text.x = element_text(angle = 90, size = 12),
+    axis.title.x = element_text(size = 15),
+    axis.title.y = element_text(size = 15)
   )
 
 manhattan
@@ -213,6 +225,7 @@ ggsave(
   height = 10,
   dpi = 300
 )
+
 
 # Chromosome-level Summary Table of Candidate Genes 
 formatted_table <- top_hits %>%
@@ -226,6 +239,8 @@ formatted_table <- top_hits %>%
   arrange(chrom)
 
 write.csv(formatted_table, output_summary_file, row.names = FALSE)
+
+
 # Final summary
 cat("Significant SNPs:", nrow(sig), "\n")
 cat("SNPs assigned to genes (within", max_gene_distance, "bp):", nrow(sig_gene), "\n")
